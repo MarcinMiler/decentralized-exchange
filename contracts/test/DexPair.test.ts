@@ -36,7 +36,7 @@ describe('DexPair', async () => {
   it('should set correct owner', async () => {
     const owner = await dexPair.factory()
 
-    expect(owner).to.eq(factory)
+    expect(owner).to.eq(factory.address)
   })
 
   it('should initialize pair', async () => {

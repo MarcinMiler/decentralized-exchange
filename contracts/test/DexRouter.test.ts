@@ -1,140 +1,79 @@
 import { BigNumber } from '@ethersproject/bignumber'
-import { Contract } from '@ethersproject/contracts'
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers'
 import { expect } from 'chai'
-import { MockProvider } from 'ethereum-waffle'
 import { ethers } from 'hardhat'
 
 import DexPair from '../artifacts/contracts/DexPair.sol/DexPair.json'
-import {
-  DexFactory,
-  DexPair as DexPairType,
-  DexRouter,
-  Token,
-} from '../typechain'
+import { setupFullRouterTest, setupTokens } from './fixtures'
 import { expandTo18Decimals } from './utils/expandTo18Decimals'
 import { getCreate2Address } from './utils/getCreate2Address'
 
-const setup = async (provider: MockProvider, wallet: SignerWithAddress) => {
-  const Token = await ethers.getContractFactory('Token')
-
-  const tokenA = await Token.deploy('Token A', 'TKA')
-  const tokenB = await Token.deploy('Token B', 'TKB')
-
-  await tokenA.deployed()
-  await tokenB.deployed()
-
-  const DexFactory = await ethers.getContractFactory('DexFactory')
-  const dexFactory = await DexFactory.deploy()
-  await dexFactory.deployed()
-
-  const DexRouter = await ethers.getContractFactory('DexRouter')
-  const dexRouter = await DexRouter.deploy(dexFactory.address)
-  await dexRouter.deployed()
-
-  const txn = await dexFactory.createPair(tokenA.address, tokenB.address)
-  await txn.wait()
-  const pairAddress = await dexFactory.getPair(tokenA.address, tokenB.address)
-
-  const dexPair = new Contract(
-    pairAddress,
-    JSON.stringify(DexPair.abi),
-    provider
-  ).connect(wallet) as DexPairType
-
-  await dexPair.reserve0()
-
-  const { token0, token1 } = await getSortedTokens(dexPair, tokenA, tokenB)
-
-  return {
-    tokenA,
-    tokenB,
-    token0,
-    token1,
-    pairAddress,
-    dexFactory,
-    dexRouter,
-    dexPair,
-  }
-}
-
-const getSortedTokens = async (
-  dexPair: DexPairType,
-  tokenA: Token,
-  tokenB: Token
-) => {
-  const token0Address = await dexPair.token0()
-
-  return token0Address === tokenA.address
-    ? { token0: tokenA, token1: tokenB }
-    : { token0: tokenB, token1: tokenA }
-}
-
-describe('DexPair', async () => {
-  const provider = new MockProvider()
-
+describe('DexRouter', async () => {
   let factory: SignerWithAddress
-  let signer2: SignerWithAddress
-
-  let tokenA: Token
-  let tokenB: Token
-  let token0: Token
-  let token1: Token
-  let pairAddress: string
-  let dexFactory: DexFactory
-  let dexRouter: DexRouter
-  let dexPair: DexPairType
+  let wallet: SignerWithAddress
 
   const MINIMUM_LIQUIDITY = 10 ** 3
 
-  beforeEach(async () => {
-    ;[factory, signer2] = await ethers.getSigners()
-
-    const fixutre = await setup(provider, factory)
-    tokenA = fixutre.tokenA
-    tokenB = fixutre.tokenB
-    token0 = fixutre.token0
-    token1 = fixutre.token1
-    pairAddress = fixutre.pairAddress
-    dexFactory = fixutre.dexFactory
-    dexRouter = fixutre.dexRouter
-    dexPair = fixutre.dexPair
+  before(async () => {
+    ;[factory, wallet] = await ethers.getSigners()
   })
 
-  // it('should set as owner dexFactory contract', async () => {
-  //   const owner = await dexRouter.factory()
+  it('should set as owner dexFactory contract', async () => {
+    const { dexFactory, dexRouter } = await setupFullRouterTest(factory, wallet)
 
-  //   expect(owner).to.eq(dexFactory.address)
-  // })
+    const owner = await dexRouter.factory()
 
-  // it('should create pair on adding liquidity if pair does not exist', async () => {
-  //   await WETH.mint(BigNumber.from(100))
-  //   await DAI.mint(BigNumber.from(100))
+    expect(owner).to.eq(dexFactory.address)
+  })
 
-  //   await WETH.approve(dexRouter.address, 100)
-  //   await DAI.approve(dexRouter.address, 100)
+  it('should create pair on adding liquidity if pair does not exist', async () => {
+    const { tokenA, tokenB } = await setupTokens()
 
-  //   const expectedPairAddress = getCreate2Address(
-  //     dexFactory.address,
-  //     [DAI.address, WETH.address],
-  //     DexPair.bytecode
-  //   )
+    const DexFactory = await ethers.getContractFactory('DexFactory')
+    const dexFactory = await DexFactory.deploy()
+    await dexFactory.deployed()
 
-  //   await expect(
-  //     dexRouter.addLiquidity(DAI.address, WETH.address, 1, 1, factory.address)
-  //   )
-  //     .to.emit(dexFactory, 'PairCreated')
-  //     .withArgs(WETH.address, DAI.address, expectedPairAddress)
+    const DexRouter = await ethers.getContractFactory('DexRouter')
+    const dexRouter = await DexRouter.deploy(dexFactory.address)
+    await dexRouter.deployed()
 
-  //   const pairAddress = await dexFactory.getPair(DAI.address, WETH.address)
+    const amountToken0 = expandTo18Decimals(1)
+    const amountToken1 = expandTo18Decimals(1)
 
-  //   expect(pairAddress).to.equal(expectedPairAddress)
-  // })
+    await tokenA.mint(amountToken0)
+    await tokenB.mint(amountToken1)
 
-  it.only(`should
-  * burn first ${MINIMUM_LIQUIDITY} liquidity tokens
-  * mint rest amount
-  `, async () => {
+    await tokenA.approve(dexRouter.address, amountToken0)
+    await tokenB.approve(dexRouter.address, amountToken1)
+
+    const expectedPairAddress = getCreate2Address(
+      dexFactory.address,
+      [tokenA.address, tokenB.address],
+      DexPair.bytecode
+    )
+
+    await expect(
+      dexRouter.addLiquidity(
+        tokenA.address,
+        tokenB.address,
+        amountToken0,
+        amountToken1,
+        factory.address
+      )
+    )
+      .to.emit(dexFactory, 'PairCreated')
+      .withArgs(tokenA.address, tokenB.address, expectedPairAddress)
+
+    const pairAddress = await dexFactory.getPair(tokenA.address, tokenB.address)
+
+    expect(pairAddress).to.equal(expectedPairAddress)
+  })
+
+  it(`should add initial liquidity`, async () => {
+    const { token0, token1, dexPair, dexRouter } = await setupFullRouterTest(
+      factory,
+      wallet
+    )
     const amountToken0 = expandTo18Decimals(1)
     const amountToken1 = expandTo18Decimals(4)
 
@@ -181,83 +120,164 @@ describe('DexPair', async () => {
     expect(lpTokensBalance).to.equal(expectedLPTokens)
   })
 
-  // it(`should revert when user provide less than ${MINIMUM_LIQUIDITY} on adding first liquidity`, async () => {
-  //   const amountWETH = 1000
-  //   const amountDAI = 1000
+  it('should add liquidity with correct asset ratio when initial liquidity is set', async () => {
+    const { token0, token1, dexPair, dexRouter } = await setupFullRouterTest(
+      factory,
+      wallet
+    )
 
-  //   await WETH.mint(BigNumber.from(amountWETH))
-  //   await DAI.mint(BigNumber.from(amountDAI))
+    const firstToken0Liquidity = expandTo18Decimals(1)
+    const firstToken1Liquidity = expandTo18Decimals(4)
 
-  //   await WETH.approve(dexRouter.address, amountWETH)
-  //   await DAI.approve(dexRouter.address, amountDAI)
+    const secondToken0Liquidity = expandTo18Decimals(1)
+    const secondToken1Liquidity = expandTo18Decimals(20)
 
-  //   await expect(
-  //     dexRouter.addLiquidity(
-  //       DAI.address,
-  //       WETH.address,
-  //       amountDAI,
-  //       amountWETH,
-  //       factory.address
-  //     )
-  //   ).to.be.revertedWith('INSUFFICIENT_LIQUIDITY_MINTED')
-  // })
+    const sendedToken1Liquidity = firstToken1Liquidity
+    const expectedLPTokens = expandTo18Decimals(2)
 
-  // it.only('should remove liquidity and receive deposited tokens', async () => {
-  //   const amountToken0 = expandTo18Decimals(2000)
-  //   const amountToken1 = expandTo18Decimals(2000)
+    const tokens1Left = secondToken1Liquidity.sub(firstToken1Liquidity)
 
-  //   await token0.mint(amountToken0)
-  //   await token1.mint(amountToken1)
+    await token0.mint(firstToken0Liquidity.add(secondToken0Liquidity))
+    await token1.mint(firstToken1Liquidity.add(secondToken1Liquidity))
 
-  //   await token0.approve(dexRouter.address, amountToken0)
-  //   await token1.approve(dexRouter.address, amountToken1)
+    await token0.approve(dexRouter.address, ethers.constants.MaxInt256)
+    await token1.approve(dexRouter.address, ethers.constants.MaxInt256)
 
-  //   const expectedToken0Return = amountToken0.sub(expandTo18Decimals(1000))
-  //   const expectedToken1Return = amountToken1.sub(expandTo18Decimals(1000))
+    await dexRouter.addLiquidity(
+      token0.address,
+      token1.address,
+      firstToken0Liquidity,
+      firstToken1Liquidity,
+      factory.address
+    )
 
-  //   const expectedLiq = expandTo18Decimals(1000)
+    await token0.approve(dexRouter.address, ethers.constants.MaxInt256)
+    await token1.approve(dexRouter.address, ethers.constants.MaxInt256)
 
-  //   await dexRouter.addLiquidity(
-  //     token0.address,
-  //     token1.address,
-  //     amountToken0,
-  //     amountToken1,
-  //     factory.address
-  //   )
+    expect(
+      await dexRouter.addLiquidity(
+        token0.address,
+        token1.address,
+        secondToken0Liquidity,
+        secondToken1Liquidity,
+        factory.address
+      )
+    )
+      .to.emit(token0, 'Transfer')
+      .withArgs(factory.address, dexPair.address, secondToken0Liquidity)
 
-  //   const lpTokens = await dexPair.balanceOf(factory.address)
+      .to.emit(token1, 'Transfer')
+      .withArgs(factory.address, dexPair.address, sendedToken1Liquidity)
 
-  //   console.log(lpTokens.toString(), 'lp')
+      .to.emit(dexPair, 'Transfer')
+      .withArgs(ethers.constants.AddressZero, factory.address, expectedLPTokens)
 
-  //   await dexPair.approve(dexRouter.address, expandTo18Decimals(1000))
+      .to.emit(dexPair, 'Sync')
+      .withArgs(
+        firstToken0Liquidity.add(secondToken0Liquidity),
+        firstToken1Liquidity.add(sendedToken1Liquidity)
+      )
 
-  //   await expect(
-  //     dexRouter.removeLiquidity(
-  //       token0.address,
-  //       token1.address,
-  //       lpTokens,
-  //       factory.address
-  //     )
-  //   )
-  //   // .to.emit(token0, 'Transfer')
-  //   // .withArgs(dexPair.address, factory.address, expectedToken0Return)
+      .to.emit(dexPair, 'Mint')
+      .withArgs(dexRouter.address, secondToken0Liquidity, sendedToken1Liquidity)
 
-  //   // .to.emit(token1, 'Transfer')
-  //   // .withArgs(dexPair.address, factory.address, expectedToken1Return)
+    const token0Balance = await token0.balanceOf(factory.address)
+    const token1Balance = await token1.balanceOf(factory.address)
 
-  //   const balance0 = await token0.balanceOf(factory.address)
-  //   const balance1 = await token0.balanceOf(factory.address)
+    expect([token0Balance, token1Balance]).to.deep.eq([
+      BigNumber.from(0),
+      tokens1Left,
+    ])
+  })
 
-  //   console.log(balance0.toString(), balance1.toString(), 'al')
+  it(`should revert when user provide less than ${MINIMUM_LIQUIDITY} on adding initial liquidity`, async () => {
+    const { token0, token1, dexRouter } = await setupFullRouterTest(
+      factory,
+      wallet
+    )
+    const amountToken0 = 1000
+    const amountToken1 = 1000
 
-  //   // .to.emit(dexPair, 'Sync')
-  //   // .withArgs(expectedLiq, expectedLiq)
+    await token0.mint(BigNumber.from(amountToken0))
+    await token1.mint(BigNumber.from(amountToken1))
 
-  //   // .to.emit(dexPair, 'Burn')
-  //   // .withArgs(dexRouter.address, expectedLiq, expectedLiq, factory.address)
-  // })
+    await token0.approve(dexRouter.address, amountToken0)
+    await token1.approve(dexRouter.address, amountToken1)
+
+    await expect(
+      dexRouter.addLiquidity(
+        token0.address,
+        token1.address,
+        amountToken0,
+        amountToken1,
+        factory.address
+      )
+    ).to.be.revertedWith('INSUFFICIENT_LIQUIDITY_MINTED')
+  })
+
+  it('should remove liquidity and receive deposited tokens', async () => {
+    const { token0, token1, dexPair, dexRouter } = await setupFullRouterTest(
+      factory,
+      wallet
+    )
+
+    const amountToken0 = expandTo18Decimals(1)
+    const amountToken1 = expandTo18Decimals(4)
+
+    await token0.mint(amountToken0)
+    await token1.mint(amountToken1)
+
+    await token0.approve(dexRouter.address, amountToken0)
+    await token1.approve(dexRouter.address, amountToken1)
+
+    const expectedToken0Return = amountToken0.sub(500)
+    const expectedToken1Return = amountToken1.sub(2000)
+
+    await dexRouter.addLiquidity(
+      token0.address,
+      token1.address,
+      amountToken0,
+      amountToken1,
+      factory.address
+    )
+
+    await dexPair.approve(dexRouter.address, expandTo18Decimals(2))
+
+    const expectedLiq = expandTo18Decimals(2).sub(MINIMUM_LIQUIDITY)
+
+    await expect(
+      dexRouter.removeLiquidity(token0.address, token1.address, expectedLiq)
+    )
+      .to.emit(dexPair, 'Transfer')
+      .withArgs(factory.address, dexPair.address, expectedLiq)
+
+      .to.emit(dexPair, 'Transfer')
+      .withArgs(dexPair.address, ethers.constants.AddressZero, expectedLiq)
+
+      .to.emit(token0, 'Transfer')
+      .withArgs(dexPair.address, factory.address, expectedToken0Return)
+
+      .to.emit(token1, 'Transfer')
+      .withArgs(dexPair.address, factory.address, expectedToken1Return)
+
+      .to.emit(dexPair, 'Sync')
+      .withArgs(500, 2000)
+
+      .to.emit(dexPair, 'Burn')
+      .withArgs(
+        dexRouter.address,
+        expectedToken0Return,
+        expectedToken1Return,
+        factory.address
+      )
+  })
 
   it('should swap exact tokens for tokens', async () => {
+    const { token0, token1, dexPair, dexRouter } = await setupFullRouterTest(
+      factory,
+      wallet
+    )
+
     const amountToken0 = expandTo18Decimals(1000000)
     const amountToken1 = expandTo18Decimals(1000000)
 
@@ -317,6 +337,11 @@ describe('DexPair', async () => {
   })
 
   it('should swap tokens for exact tokens', async () => {
+    const { token0, token1, dexPair, dexRouter } = await setupFullRouterTest(
+      factory,
+      wallet
+    )
+
     const amountToken0 = expandTo18Decimals(1000000)
     const amountToken1 = expandTo18Decimals(1000000)
 
@@ -373,5 +398,41 @@ describe('DexPair', async () => {
 
     expect(pairToken0Balance).to.eq(BigNumber.from(expectedToken0Liq))
     expect(pairToken1Balance).to.eq(BigNumber.from(expectedToken1Liq))
+  })
+
+  it('should quote', async () => {
+    const { dexRouter } = await setupFullRouterTest(factory, wallet)
+
+    expect(
+      await dexRouter.quote(
+        expandTo18Decimals(1),
+        expandTo18Decimals(10),
+        expandTo18Decimals(20)
+      )
+    ).to.deep.equal(expandTo18Decimals(2))
+  })
+
+  it('should getAmountOut', async () => {
+    const { dexRouter } = await setupFullRouterTest(factory, wallet)
+
+    expect(
+      await dexRouter.getAmountOut(
+        expandTo18Decimals(1),
+        expandTo18Decimals(999999999),
+        expandTo18Decimals(999999999)
+      )
+    ).to.deep.eq('996999999005990999') // 0.996
+  })
+
+  it('should getAmountIn', async () => {
+    const { dexRouter } = await setupFullRouterTest(factory, wallet)
+
+    expect(
+      await dexRouter.getAmountIn(
+        expandTo18Decimals(1),
+        expandTo18Decimals(999999999),
+        expandTo18Decimals(999999999)
+      )
+    ).to.deep.eq('1003009028084252761') // 1.003
   })
 })

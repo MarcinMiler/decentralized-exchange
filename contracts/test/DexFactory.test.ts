@@ -59,4 +59,12 @@ describe('DexFactory', function () {
       )
     ).to.be.revertedWith('ZERO ADDRESS')
   })
+
+  it('should revert when pair already exists', async () => {
+    dexFactory.createPair(WETH.address, DAI.address)
+
+    expect(dexFactory.createPair(WETH.address, DAI.address)).to.be.revertedWith(
+      'PAIR EXISTS'
+    )
+  })
 })

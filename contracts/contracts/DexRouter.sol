@@ -56,14 +56,13 @@ contract DexRouter {
   function removeLiquidity(
     address tokenA,
     address tokenB,
-    uint liquidity,
-    address to
+    uint liquidity
   ) public returns (uint amountA, uint amountB) {
     address pair = DexLibrary.pairFor(factory, tokenA, tokenB);
 
     IDexPair(pair).transferFrom(msg.sender, pair, liquidity);
-
-    (uint amount0, uint amount1) = DexPair(pair).burn(to);
+    
+    (uint amount0, uint amount1) = DexPair(pair).burn(msg.sender);
     (address token0,) = DexLibrary.sortTokens(tokenA, tokenB);
     (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
   }
@@ -120,6 +119,6 @@ contract DexRouter {
   }
 
   function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) public pure returns (uint amountIn) {
-    return DexLibrary.getAmountOut(amountOut, reserveIn, reserveOut);
+    return DexLibrary.getAmountIn(amountOut, reserveIn, reserveOut);
   }
 }

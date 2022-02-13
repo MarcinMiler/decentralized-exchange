@@ -78,7 +78,6 @@ contract DexPair is DexERC20 {
   }
 
   function burn(address to) external returns (uint amount0, uint amount1) {
-    // (uint _reserve0, uint _reserve1) = getReserves();
     address _token0 = token0;
     address _token1 = token1;
     uint _totalSupply = totalSupply;
@@ -121,9 +120,6 @@ contract DexPair is DexERC20 {
 
     uint balance0 = IERC20(token0).balanceOf(address(this));
     uint balance1 = IERC20(token1).balanceOf(address(this));
-
-    // console.log("Amount %s %s", amount0, amount1);
-    // console.log("Balance %s %s", balance0, balance1);
 
     _update(balance0, balance1);
   }
